@@ -136,7 +136,10 @@ SHELL = $(if $(wildcard $(SHELL_PATH)),/bin/ash,/bin/bash)
 # 	https://play.openpolicyagent.org/
 # 	https://academy.styra.com/
 # 	https://www.openpolicyagent.org/docs/latest/policy-reference/
-
+# 
+# Tilt-dev: https://docs.tilt.dev/index.html
+# ctlptl: https://github.com/tilt-dev/ctlptl
+#
 # ==============================================================================
 # Define dependencies
 
@@ -158,6 +161,9 @@ SERVICE_NAME    := sales-api
 VERSION         := 0.0.1
 SERVICE_IMAGE   := $(BASE_IMAGE_NAME)/$(SERVICE_NAME):$(VERSION)
 METRICS_IMAGE   := $(BASE_IMAGE_NAME)/$(SERVICE_NAME)-metrics:$(VERSION)
+LOCAL_REGISTRY  := "127.0.0.1:5005"
+SERVICE_REF     := $(LOCAL_REGISTRY)/$(SERVICE_NAME):$(VERSION)
+METRICS_REF     := $(LOCAL_REGISTRY)/$(SERVICE_NAME)-metrics:$(VERSION)
 
 # VERSION       := "0.0.1-$(shell git rev-parse --short HEAD)"
 
@@ -197,6 +203,15 @@ dev-docker:
 	docker pull $(TEMPO)
 	docker pull $(TELEPRESENCE)
 
+# only install one, do not need to install both!
+dev-brew-tilt:
+	brew list tilt || brew install tilt-dev/tap/tilt
+	brew list ctlptl || brew install tilt-dev/tap/ctlptl
+
+dev-golang-tilt:
+	brew list tilt || brew upgrade tilt-dev/tap/tilt
+	go install github.com/tilt-dev/ctlptl/cmd/ctlptl@latest
+
 # ==============================================================================
 # Building containers
 
@@ -217,6 +232,18 @@ metrics:
 		--build-arg BUILD_REF=$(VERSION) \
 		--build-arg BUILD_DATE=`date -u +"%Y-%m-%dT%H:%M:%SZ"` \
 		.
+
+push-service-local-registry:
+	docker tag $(SERVICE_IMAGE) $(SERVICE_REF) \
+    && docker push $(SERVICE_REF)
+
+push-metrics-local-registry:
+	docker tag $(METRICS_IMAGE) $(METRICS_REF) \
+    && docker push $(METRICS_REF)
+
+service-push-local: service push-service-local-registry
+
+metrics-push-local: metrics push-metrics-local-registry
 
 # ==============================================================================
 # Running from within k8s/kind
@@ -246,6 +273,16 @@ dev-down-local:
 dev-down:
 	telepresence quit -s
 	kind delete cluster --name $(KIND_CLUSTER)
+
+# using tilt, create a kind cluster with a internal registry
+# next session is not required anymore
+dev-tilt-up:
+	ctlptl create registry ctlptl-registry --port=5005
+	ctlptl create cluster kind --registry=ctlptl-registry
+
+dev-tilt-down:
+	ctlptl delete cluster kind --cascade=true
+	ctlptl delete registry ctlptl-registry
 
 # ------------------------------------------------------------------------------
 
@@ -280,6 +317,12 @@ dev-restart:
 dev-update: all dev-load dev-restart
 
 dev-update-apply: all dev-load dev-apply
+
+tilt-up:
+	tilt up
+
+tilt-down:
+	tilt down
 
 # ------------------------------------------------------------------------------
 
